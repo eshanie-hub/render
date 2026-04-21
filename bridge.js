@@ -28,7 +28,17 @@ const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] },
 });
 
-app.use(cors());
+app.use(cors({
+    origin: "https://project-8s75c.vercel.app", // Your Vercel URL
+    credentials: true
+}));
+
+const io = new Server(server, {
+    cors: { 
+        origin: "https://project-8s75c.vercel.app", 
+        methods: ["GET", "POST"] 
+    },
+});
 app.use(express.json());
 
 // MongoDB Connection
@@ -156,5 +166,5 @@ client.on("message", async (topic, message) => {
     }
 });
 
-const PORT = process.env.PORT || 5000;
-server.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+const PORT = process.env.PORT || 8080; // Match Railway's expected port
+server.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT}`));
