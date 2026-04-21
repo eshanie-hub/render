@@ -24,21 +24,22 @@ const chatRoutes = require('./routes/chat');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server, {
-    cors: { origin: "*", methods: ["GET", "POST"] },
-});
 
-app.use(cors({
-    origin: "https://project-8s75c.vercel.app", // Your Vercel URL
-    credentials: true
-}));
-
+// FIX 1: Only ONE 'io' declaration with correct CORS for Vercel
 const io = new Server(server, {
     cors: { 
         origin: "https://project-8s75c.vercel.app", 
-        methods: ["GET", "POST"] 
+        methods: ["GET", "POST"],
+        credentials: true
     },
 });
+
+// FIX 2: Explicit CORS middleware for Express
+app.use(cors({
+    origin: "https://project-8s75c.vercel.app",
+    credentials: true
+}));
+
 app.use(express.json());
 
 // MongoDB Connection
@@ -61,15 +62,21 @@ const client = mqtt.connect(process.env.MQTT_URL, {
     password: process.env.MQTT_PASS,
 });
 
-let sessionTotalEnergy = 0;
-
-// WebSocket Connection Handler
+// FIX 3: Merged WebSocket Connection Handler (Only one block)
 io.on("connection", (socket) => {
-  console.log(`New Web Client Connected: ${socket.id}`);
+    console.log(`🔌 New Web Client Connected: ${socket.id}`);
 
-  socket.on("disconnect", () => {
-    console.log("Client Disconnected");
-  });
+    // Receive "YES" from React Frontend and send to ESP32
+    socket.on("uiLockResponse", (response) => {
+        if (response === "yes") {
+            console.log("➡️ UI Command: Sending LOCK to ESP32");
+            client.publish("sensor/command", "lock");
+        }
+    });
+
+    socket.on("disconnect", () => {
+        console.log("🔌 Client Disconnected");
+    });
 });
 
 client.on("connect", () => {
@@ -81,34 +88,17 @@ client.on("connect", () => {
     client.subscribe("sensor/lock_request");
 });
 
-// WebSocket Handler
-io.on("connection", (socket) => {
-    console.log(`🔌 New Web Client: ${socket.id}`);
-
-    // Receive "YES" from React Frontend and send to ESP32
-    socket.on("uiLockResponse", (response) => {
-        if (response === "yes") {
-            console.log("➡️ UI Command: Sending LOCK to ESP32");
-            client.publish("sensor/command", "lock");
-        }
-    });
-
-    socket.on("disconnect", () => console.log("🔌 Client Disconnected"));
-});
-
 client.on("message", async (topic, message) => {
     try {
         const data = JSON.parse(message.toString());
 
         // 1. HANDLE LOCK REQUEST ALERT FROM ESP32
         if (topic === "sensor/lock_request") {
-          const data = JSON.parse(message.toString());
-          
-          if (data.alert === "clear") {
-              io.emit("clearLockUI"); // New event to hide the popup
-          } else {
-              io.emit("requestLockUI", { message: "Lid is closed. Lock now?" });
-          }
+            if (data.alert === "clear") {
+                io.emit("clearLockUI");
+            } else {
+                io.emit("requestLockUI", { message: "Lid is closed. Lock now?" });
+            }
         }
 
         // 2. SECURITY / RFID LOGS
@@ -119,15 +109,8 @@ client.on("message", async (topic, message) => {
         }
 
         // 3. MOTION
-                
         else if (topic === "sensor/motion") {
-            console.log("🏃 Motion Received from ESP32:", data);
-
-            // Get most recent saved record for exponential moving average
             const lastLog = await MotionLog.findOne().sort({ createdAt: -1 });
-
-            // Exponential moving average
-            // Alpha 0.3 = new reading 30%, history 70%
             const alpha = 0.3;
             const lastRolling = lastLog ? lastLog.rolling_risk : data.risk_score;
             const rollingRisk = Math.round((alpha * data.risk_score) + ((1 - alpha) * lastRolling));
@@ -138,16 +121,13 @@ client.on("message", async (topic, message) => {
             });
 
             await newMotionLog.save();
-
             io.emit("motionUpdate", {
                 ...newMotionLog.toObject(),
                 rolling_risk: rollingRisk
             });
-
-            console.log(`Motion saved | Current: ${data.risk_score}% | Rolling: ${rollingRisk}%`);
         }
 
-        // 4. TEMPERATURE & HUMIDITY (with Route ID)
+        // 4. TEMPERATURE & HUMIDITY
         else if (topic === "sensor/temperature" || topic === "sensor/humidity") {
             const activeRoute = await RouteSession.findOne({ status: "ACTIVE" }).sort({ createdAt: -1 });
             const Model = topic === "sensor/temperature" ? TemperatureLog : HumidityLog;
@@ -166,5 +146,8 @@ client.on("message", async (topic, message) => {
     }
 });
 
-const PORT = process.env.PORT || 8080; // Match Railway's expected port
-server.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT}`));
+// FIX 4: Use 0.0.0.0 for Cloud Deployment
+const PORT = process.env.PORT || 8080; 
+server.listen(PORT, "0.0.0.0", () => {
+    console.log(`🚀 Server running on port ${PORT}`);
+});
