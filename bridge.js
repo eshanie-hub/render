@@ -6,14 +6,12 @@ const cors = require("cors");
 const http = require("http");
 const { Server } = require("socket.io");
 
-// Models
+// Models & Routes (Keeping your existing imports)
 const AccessLog = require("./mongodb/security");
 const MotionLog = require("./mongodb/motion");
 const TemperatureLog = require("./mongodb/temperature");
 const HumidityLog = require("./mongodb/humidity");
 const RouteSession = require("./mongodb/routeSession");
-
-// Routes
 const securityRoutes = require("./routes/security");
 const authRoutes = require("./routes/authRoutes");
 const motionRoutes = require("./routes/motion");
@@ -25,18 +23,22 @@ const chatRoutes = require('./routes/chat');
 const app = express();
 const server = http.createServer(app);
 
-// FIX 1: Only ONE 'io' declaration with correct CORS for Vercel
+// FIX: Flexible CORS to handle Vercel deployment previews
+const allowedOrigins = [
+    "https://project-8s75c.vercel.app",
+    /\.vercel\.app$/  // This allows any vercel.app sub-domain (fixing your console error)
+];
+
 const io = new Server(server, {
     cors: { 
-        origin: "https://project-8s75c.vercel.app", 
+        origin: allowedOrigins, 
         methods: ["GET", "POST"],
         credentials: true
     },
 });
 
-// FIX 2: Explicit CORS middleware for Express
 app.use(cors({
-    origin: "https://project-8s75c.vercel.app",
+    origin: allowedOrigins,
     credentials: true
 }));
 
@@ -62,92 +64,47 @@ const client = mqtt.connect(process.env.MQTT_URL, {
     password: process.env.MQTT_PASS,
 });
 
-// FIX 3: Merged WebSocket Connection Handler (Only one block)
+// Merged WebSocket Handler
 io.on("connection", (socket) => {
     console.log(`🔌 New Web Client Connected: ${socket.id}`);
-
-    // Receive "YES" from React Frontend and send to ESP32
     socket.on("uiLockResponse", (response) => {
         if (response === "yes") {
-            console.log("➡️ UI Command: Sending LOCK to ESP32");
             client.publish("sensor/command", "lock");
         }
     });
-
-    socket.on("disconnect", () => {
-        console.log("🔌 Client Disconnected");
-    });
+    socket.on("disconnect", () => console.log("🔌 Client Disconnected"));
 });
 
 client.on("connect", () => {
     console.log("📡 Connected to HiveMQ Cloud");
-    client.subscribe("sensor/security");
-    client.subscribe("sensor/motion");
-    client.subscribe("sensor/temperature");
-    client.subscribe("sensor/humidity");
-    client.subscribe("sensor/lock_request");
+    client.subscribe(["sensor/security", "sensor/motion", "sensor/temperature", "sensor/humidity", "sensor/lock_request"]);
 });
 
 client.on("message", async (topic, message) => {
     try {
         const data = JSON.parse(message.toString());
-
-        // 1. HANDLE LOCK REQUEST ALERT FROM ESP32
         if (topic === "sensor/lock_request") {
-            if (data.alert === "clear") {
-                io.emit("clearLockUI");
-            } else {
-                io.emit("requestLockUI", { message: "Lid is closed. Lock now?" });
-            }
-        }
-
-        // 2. SECURITY / RFID LOGS
-        else if (topic === "sensor/security") {
-            const newLog = new AccessLog(data);
-            await newLog.save();
+            data.alert === "clear" ? io.emit("clearLockUI") : io.emit("requestLockUI", { message: "Lid is closed. Lock now?" });
+        } else if (topic === "sensor/security") {
+            await new AccessLog(data).save();
             io.emit("lockUpdate", data);
-        }
-
-        // 3. MOTION
-        else if (topic === "sensor/motion") {
+        } else if (topic === "sensor/motion") {
             const lastLog = await MotionLog.findOne().sort({ createdAt: -1 });
-            const alpha = 0.3;
-            const lastRolling = lastLog ? lastLog.rolling_risk : data.risk_score;
-            const rollingRisk = Math.round((alpha * data.risk_score) + ((1 - alpha) * lastRolling));
-
-            const newMotionLog = new MotionLog({
-                ...data,
-                rolling_risk: rollingRisk
-            });
-
+            const rollingRisk = Math.round((0.3 * data.risk_score) + (0.7 * (lastLog ? lastLog.rolling_risk : data.risk_score)));
+            const newMotionLog = new MotionLog({ ...data, rolling_risk: rollingRisk });
             await newMotionLog.save();
-            io.emit("motionUpdate", {
-                ...newMotionLog.toObject(),
-                rolling_risk: rollingRisk
-            });
-        }
-
-        // 4. TEMPERATURE & HUMIDITY
-        else if (topic === "sensor/temperature" || topic === "sensor/humidity") {
+            io.emit("motionUpdate", { ...newMotionLog.toObject(), rolling_risk: rollingRisk });
+        } else if (topic === "sensor/temperature" || topic === "sensor/humidity") {
             const activeRoute = await RouteSession.findOne({ status: "ACTIVE" }).sort({ createdAt: -1 });
             const Model = topic === "sensor/temperature" ? TemperatureLog : HumidityLog;
-            const eventName = topic === "sensor/temperature" ? "temperatureUpdate" : "humidityUpdate";
-
-            const newLog = new Model({
-                ...data,
-                route_id: activeRoute ? activeRoute.route_id : null,
-            });
+            const newLog = new Model({ ...data, route_id: activeRoute ? activeRoute.route_id : null });
             await newLog.save();
-            io.emit(eventName, newLog);
+            io.emit(topic === "sensor/temperature" ? "temperatureUpdate" : "humidityUpdate", newLog);
         }
-
     } catch (error) {
-        console.error("❌ MQTT processing error:", error.message);
+        console.error("❌ MQTT error:", error.message);
     }
 });
 
-// FIX 4: Use 0.0.0.0 for Cloud Deployment
 const PORT = process.env.PORT || 8080; 
-server.listen(PORT, "0.0.0.0", () => {
-    console.log(`🚀 Server running on port ${PORT}`);
-});
+server.listen(PORT, "0.0.0.0", () => console.log(`🚀 Server running on port ${PORT}`));
