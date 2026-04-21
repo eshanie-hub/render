@@ -1,0 +1,71 @@
+{
+  "security": {
+    "meanings": {
+      "open": "When the authorized RFID card is presented and the medicine box is locked, the box will open.",
+      "locked": "When the authorized RFID card is presented and the medicine box is open, the box will lock.",
+      "denied": "An unauthorized RFID card is presented to the medicine box.",
+      "unusual_hours": "The medicine box was opened outside its normal time periods.",
+      "high_access": "The medicine box was opened more frequently than usual."
+    },
+    "schema": {
+      "Accesslogs": {
+        "Timestamp": "datetime",
+        "Card_id": "string",
+        "Status": "string",
+        "recievedAt": "datetime"
+      }
+    },
+    "dashboard": {
+      "safety_anomalies_table": {
+        "description": "Summary of anomalies grouped by anomaly type and RFID card for a given date.",
+        "location": "Top-left corner of the dashboard"
+      },
+      "security_alert": {
+        "description": "Indicates current security state and last opened time of the medicine box.",
+        "location": "Top-left corner of the dashboard"
+      },
+      "security_logs_table": {
+        "description": "Logs every access attempt to the medicine box.",
+        "location": "Bottom-left under the security tab"
+      }
+    }
+  },
+  "motion": {
+    "meanings": {
+      "stable": "No motion detected. Ideal transport conditions with zero risk.",
+      "moderate_vibration": "Slight movement detected within acceptable limits. Medicine is safe.",
+      "high_vibration": "High vibrations detected. Transport environment is unstable.",
+      "critical_vibration": "Critical impact detected exceeding safety limits. Immediate inspection required.",
+      "risk_levels": {
+        "low": "Up to 20%: Smooth transportation, medicine likely in perfect condition.",
+        "medium": "20% to 60%: Several rough patches encountered, visual inspection recommended.",
+        "high": "Above 60%: Significant mechanical stress, lab verification required before distribution."
+      }
+    },
+    "schema": {
+      "Motionlogs": {
+        "Time": "datetime",
+        "Total_g": "float",
+        "Net_g": "float",
+        "Status": "string",
+        "Alert": "string",
+        "createdAt": "datetime",
+        "updatedAt": "datetime"
+      }
+    },
+    "dashboard": {
+      "vibration_alert": {
+        "description": "Status warning triggered by rough transport conditions such as potholes or sudden braking.",
+        "location": "Middle card in the left panel (Vibration section)"
+      },
+      "vibration_logs": {
+        "description": "Detailed log of motion events including time, net g, total g, and status.",
+        "location": "Bottom-left quadrant of the dashboard"
+      },
+      "vibration_risk_prediction": {
+        "description": "Predictive gauge indicating likelihood of medicine compromise during transport.",
+        "location": "Bottom-right quadrant of the dashboard"
+      }
+    }
+  }
+}
